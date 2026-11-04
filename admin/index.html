@@ -11405,6 +11405,20 @@
 							</select>
 						</div>
 
+						<div class="form-group mobile-half" id="xhttpMaxConcurrencyGroup" style="display: none;">
+							<label for="xhttpMaxConcurrency"
+								title="每条底层 TCP/QUIC 连接允许的最大并发代理连接数。支持整数或范围，例如 16-32；与 maxConnections 互斥。留空使用 Xray 默认值。">XMUX 最大并发数 (maxConcurrency)</label>
+							<input type="text" id="xhttpMaxConcurrency" placeholder="留空使用默认值，例如 16-32"
+								onchange="handleXHTTPXmuxChange('maxConcurrency')">
+						</div>
+
+						<div class="form-group mobile-half" id="xhttpMaxConnectionsGroup" style="display: none;">
+							<label for="xhttpMaxConnections"
+								title="允许建立的底层 TCP/QUIC 连接总数。支持整数或范围，例如 1 或 1-4；0 表示不限制；与 maxConcurrency 互斥。留空使用 Xray 默认值。">XMUX 最大连接数 (maxConnections)</label>
+							<input type="text" id="xhttpMaxConnections" placeholder="留空使用默认值，例如 1 或 1-4"
+								onchange="handleXHTTPXmuxChange('maxConnections')">
+						</div>
+
 						<div class="form-group mobile-half" id="grpcModeGroup" style="display: none;">
 							<label for="grpcMode">gRPC模式</label>
 							<select id="grpcMode" title="gRPC模式" onchange="markModified('config')">
@@ -20848,9 +20862,50 @@
 			hideTransportGrpcTooltip();
 		}
 
+		function updateXHTTPXmuxVisibility() {
+			const transportSelect = document.getElementById('transport');
+			const maxConcurrencyGroup = document.getElementById('xhttpMaxConcurrencyGroup');
+			const maxConnectionsGroup = document.getElementById('xhttpMaxConnectionsGroup');
+			const hasXmuxConfig = !!(currentConfig?.XHTTP?.xmux && typeof currentConfig.XHTTP.xmux === 'object');
+			const visible = hasXmuxConfig && transportSelect?.value === 'xhttp';
+			if (maxConcurrencyGroup) maxConcurrencyGroup.style.display = visible ? '' : 'none';
+			if (maxConnectionsGroup) maxConnectionsGroup.style.display = visible ? '' : 'none';
+		}
+
+		function syncXHTTPXmuxSettingsFromConfig() {
+			const xmux = currentConfig?.XHTTP?.xmux || {};
+			const maxConcurrencyInput = document.getElementById('xhttpMaxConcurrency');
+			const maxConnectionsInput = document.getElementById('xhttpMaxConnections');
+			if (maxConcurrencyInput) maxConcurrencyInput.value = xmux.maxConcurrency ?? '';
+			if (maxConnectionsInput) maxConnectionsInput.value = xmux.maxConnections ?? '';
+			updateXHTTPXmuxVisibility();
+		}
+
+		function handleXHTTPXmuxChange(field) {
+			const maxConcurrencyInput = document.getElementById('xhttpMaxConcurrency');
+			const maxConnectionsInput = document.getElementById('xhttpMaxConnections');
+			const changedInput = field === 'maxConcurrency' ? maxConcurrencyInput : maxConnectionsInput;
+			const otherInput = field === 'maxConcurrency' ? maxConnectionsInput : maxConcurrencyInput;
+			if (changedInput?.value.trim() && otherInput) otherInput.value = '';
+			markModified('config');
+		}
+
+		function parseXHTTPXmuxValue(input, label) {
+			const value = input?.value.trim() || '';
+			if (!value) return '';
+			const match = /^(\d+)(?:-(\d+))?$/.exec(value);
+			if (!match || (match[2] !== undefined && Number(match[2]) < Number(match[1]))) {
+				showToast(label + ' 格式无效，请填写非负整数或范围（例如 16-32）', 'error');
+				input?.focus();
+				return null;
+			}
+			return value;
+		}
+
 		function handleTransportChange() {
 			updateGrpcModeVisibility();
 			updateTransportGrpcTooltipVisibility(true);
+			updateXHTTPXmuxVisibility();
 			const protocolSelect = document.getElementById('protocol');
 			updateProtocolOptionAvailability(protocolSelect ? protocolSelect.value : '');
 			markModified('config');
@@ -20882,6 +20937,7 @@
 					grpcUserAgentGroup.style.display = 'none';
 				}
 				hideTransportGrpcTooltip();
+				syncXHTTPXmuxSettingsFromConfig();
 				return;
 			}
 
@@ -20903,6 +20959,7 @@
 
 			updateGrpcModeVisibility();
 			updateTransportGrpcTooltipVisibility(false);
+			syncXHTTPXmuxSettingsFromConfig();
 		}
 
 		function syncSSProtocolSettingsFromConfig() {
@@ -21038,6 +21095,7 @@
 
 			// 协议/TLS 变化会影响 ECH 可用性
 			updateECHOptionState();
+			updateXHTTPXmuxVisibility();
 		}
 
 		// 处理浏览器指纹变化，联动ECH选项
@@ -22062,6 +22120,20 @@
 					}
 					currentConfig['gRPCUserAgent'] = grpcUserAgentInput.value || '';
 				}
+			}
+
+			// 保存 XHTTP XMUX 设置；两个限制参数互斥，支持整数或范围字符串。
+			if (currentConfig.XHTTP?.xmux && typeof currentConfig.XHTTP.xmux === 'object') {
+				const maxConcurrency = parseXHTTPXmuxValue(document.getElementById('xhttpMaxConcurrency'), 'maxConcurrency');
+				if (maxConcurrency === null) return;
+				const maxConnections = parseXHTTPXmuxValue(document.getElementById('xhttpMaxConnections'), 'maxConnections');
+				if (maxConnections === null) return;
+				if (maxConcurrency !== '' && maxConnections !== '') {
+					showToast('maxConcurrency 与 maxConnections 互斥，请只填写其中一项', 'error');
+					return;
+				}
+				currentConfig.XHTTP.xmux.maxConcurrency = maxConcurrency;
+				currentConfig.XHTTP.xmux.maxConnections = maxConnections;
 			}
 			currentConfig.跳过证书验证 = document.getElementById('skipVerify').checked;
 
